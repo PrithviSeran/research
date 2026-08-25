@@ -82,10 +82,11 @@ def _bounded_text(value, name, limit, *, empty=False):
     return value
 
 
-def _freeze_mapping(value, name, *, allowed_keys=None, value_limit=MAX_CONTEXT_VALUE_CHARS):
+def _freeze_mapping(value, name, *, allowed_keys=None, value_limit=MAX_CONTEXT_VALUE_CHARS,
+                    max_items=MAX_CONTEXT_ITEMS):
     if not isinstance(value, dict):
         raise TypeError(f"{name} must be a dict")
-    if len(value) > MAX_CONTEXT_ITEMS:
+    if len(value) > max_items:
         raise ValueError(f"{name} has too many entries")
     frozen = {}
     for key, item in sorted(value.items()):
@@ -183,8 +184,8 @@ class SpecialistReceipt:
             value = getattr(self, field_name)
             if not isinstance(value, int) or value < 0:
                 raise ValueError(f"{field_name} must be a non-negative integer")
-        object.__setattr__(self, "usage", _freeze_mapping(dict(self.usage), "usage",
-                                                           value_limit=200))
+        object.__setattr__(self, "usage", _freeze_mapping(
+            dict(self.usage), "usage", value_limit=200, max_items=24))
         object.__setattr__(self, "disturbance_delta", _freeze_mapping(
             dict(self.disturbance_delta), "disturbance_delta", value_limit=100))
 
@@ -211,8 +212,8 @@ class SpecialistReceipt:
             SpecialistKind(specialist), status,
             _bounded_text(summary, "summary", MAX_SUMMARY_CHARS), evidence,
             _bounded_text(stop_reason, "stop_reason", 128), turns, tool_calls,
-            physical_operations, _freeze_mapping(dict(usage), "usage",
-                                                  value_limit=200),
+            physical_operations, _freeze_mapping(
+                dict(usage), "usage", value_limit=200, max_items=24),
             _bounded_text(trace_id, "trace_id", 128),
             _freeze_mapping(dict(disturbance_delta), "disturbance_delta",
                             value_limit=100), trusted_evidence)

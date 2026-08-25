@@ -17,6 +17,7 @@ Knobs (env):
   HUNCH_OLLAMA_TOOL_PROFILE  'all', 'ax', 'web', or 'native' (default 'all')
   HUNCH_OLLAMA_HISTORY_CHARS approximate replay budget (default 48000)
   HUNCH_OLLAMA_TOOL_RESULT_CHARS per-result replay cap (default 12000)
+  HUNCH_OLLAMA_RECIPES  '0' disables the bundled verified Qwen recipe pack
 
 Two measured facts about small local models shape this file (probe 2026-08-07,
 qwen3.5:9b on the real playbook + a real Settings snapshot):
@@ -402,6 +403,14 @@ class OllamaBackend(Backend):
         return json.dumps([name, args, result.get("content", "")], sort_keys=True,
                           ensure_ascii=False, separators=(",", ":"))
 
+    @staticmethod
+    def _is_applescript_compile_error(name, result):
+        if name != "applescript":
+            return False
+        text = str(result.get("content", "")).casefold()
+        return ("applescript error:" in text
+                and ("script error:" in text or "(-2741)" in text))
+
     def _run_tool(self, name, args, emit):
         """Dispatch one call and return its role='tool' message. PNG bytes ride in
         Ollama's images channel (base64) with a text placeholder."""
@@ -440,6 +449,10 @@ class OllamaBackend(Backend):
             if profile in PROFILE_GUIDANCE:
                 system += ("\n\n── Active tool profile: " + profile + " ──\n"
                            + PROFILE_GUIDANCE[profile])
+            if (profile in {"all", "native"}
+                    and os.environ.get("HUNCH_OLLAMA_RECIPES", "1") != "0"):
+                from ..recipes import qwen_recipe_text
+                system += "\n\n" + qwen_recipe_text()
             strict = os.environ.get("HUNCH_OLLAMA_STRICT") == "1"
         else:
             model = model or self.session_config.model
@@ -455,6 +468,8 @@ class OllamaBackend(Backend):
         usage = {"input_tokens": 0, "output_tokens": 0, "fallback_tool_calls": 0,
                  "continue_nudges": 0, "prose_tool_calls": 0,
                  "malformed_tool_calls": 0, "rejected_tool_calls": 0,
+                 "applescript_compile_errors": 0,
+                 "applescript_compile_aborts": 0,
                  "no_progress_warnings": 0, "no_progress_aborts": 0,
                  "context_compactions": 0, "context_messages_pruned": 0,
                  "tool_results_truncated": 0, "max_context_chars": 0,
@@ -463,6 +478,7 @@ class OllamaBackend(Backend):
         acted = False                  # any tool call dispatched this run
         attempted = False              # includes calls rejected before dispatch
         repeated = {}
+        applescript_compile_errors = 0
         self._abort = False
         self._deadline = deadline
 
@@ -528,6 +544,16 @@ class OllamaBackend(Backend):
                         continue
                     acted = True
                     result = self._run_tool(name, args, emit)
+                    if self._is_applescript_compile_error(name, result):
+                        applescript_compile_errors += 1
+                        usage["applescript_compile_errors"] += 1
+                        if applescript_compile_errors == 2:
+                            result["content"] += (
+                                "\n\nAPPLESCRIPT_COMPILE_LOOP: Stop improvising syntax. "
+                                "Copy the closest bundled verified recipe exactly and "
+                                "substitute only its placeholders.")
+                    elif name == "applescript":
+                        applescript_compile_errors = 0
                     fp = self._fingerprint(name, args, result)
                     repeated[fp] = repeated.get(fp, 0) + 1
                     if repeated[fp] == 2:
@@ -535,12 +561,17 @@ class OllamaBackend(Backend):
                         result["content"] += ("\n\nNO_PROGRESS: this exact action returned the exact "
                                               "same state twice. Choose a different action or route.")
                     self.messages.append(result)
+                    if applescript_compile_errors >= 3:
+                        usage["applescript_compile_aborts"] += 1
+                        stop_reason, aborted = "applescript_compile_loop", True
+                        emit("error", "aborted: three consecutive AppleScript compile errors")
+                        break
                     if repeated[fp] >= 3:
                         usage["no_progress_aborts"] += 1
                         stop_reason, aborted = "no_progress", True
                         emit("error", "aborted: identical action and result repeated three times")
                         break
-                if stop_reason == "no_progress":
+                if stop_reason in {"no_progress", "applescript_compile_loop"}:
                     break
                 continue
 

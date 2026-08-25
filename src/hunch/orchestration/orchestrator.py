@@ -70,6 +70,7 @@ def _safe_usage(usage):
                "context_messages_pruned", "tool_results_truncated",
                "max_context_chars", "fallback_tool_calls", "continue_nudges",
                "rejected_tool_calls", "malformed_tool_calls", "no_progress_aborts"}
+    allowed.update({"applescript_compile_errors", "applescript_compile_aborts"})
     return {key: value for key, value in (usage or {}).items()
             if key in allowed and isinstance(value, (str, int, float, bool, type(None)))}
 

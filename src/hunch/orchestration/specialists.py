@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from importlib.resources import files
 
 from ..agent import _DISPATCH
+from ..recipes import qwen_recipe_text
 from .contracts import SpecialistKind
 
 
@@ -11,10 +12,17 @@ from .contracts import SpecialistKind
 class SpecialistSpec:
     kind: SpecialistKind
     tool_names: frozenset[str]
-    recipe_resource: str
+    recipe_resource: str | None
     allowed_context_keys: frozenset[str]
 
     def prompt(self):
+        if self.kind is SpecialistKind.APPLESCRIPT:
+            return ("You are the AppleScript specialist. Complete only the delegated "
+                    "objective with the bundled verified recipes. Never activate an app. "
+                    "Do not claim deterministic verification; briefly report the "
+                    "read-back or blocked state.\n\n" + qwen_recipe_text())
+        if self.recipe_resource is None:
+            raise RuntimeError(f"missing recipe resource for {self.kind.value}")
         return files("hunch.orchestration.recipes").joinpath(self.recipe_resource).read_text()
 
 
@@ -22,7 +30,7 @@ SPECIALISTS = {
     SpecialistKind.APPLESCRIPT: SpecialistSpec(
         SpecialistKind.APPLESCRIPT,
         frozenset({"applescript", "clipboard_get", "clipboard_set", "list_apps",
-                   "notify_user"}), "applescript.md",
+                   "notify_user"}), None,
         frozenset({"app", "account", "target", "source", "note_title",
                    "list_name", "source_directory", "folder_path"})),
     SpecialistKind.NATIVE: SpecialistSpec(

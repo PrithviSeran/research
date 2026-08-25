@@ -106,6 +106,22 @@ def test_configured_sessions_isolate_prompt_tools_and_history(monkeypatch):
     assert a.messages[0]["content"] == "task-a" and b.messages[0]["content"] == "task-b"
 
 
+def test_direct_native_session_loads_versioned_recipes_but_ax_does_not(monkeypatch):
+    monkeypatch.setenv("HUNCH_OLLAMA_TOOL_PROFILE", "native")
+    native = _backend([_msg("done")] * 3)
+    native.run("task")
+    assert "Verified operation recipes for Qwen" in native.last_system
+    monkeypatch.setenv("HUNCH_OLLAMA_TOOL_PROFILE", "ax")
+    ax = _backend([_msg("done")] * 3)
+    ax.run("task")
+    assert "Verified operation recipes for Qwen" not in ax.last_system
+    monkeypatch.setenv("HUNCH_OLLAMA_TOOL_PROFILE", "native")
+    monkeypatch.setenv("HUNCH_OLLAMA_RECIPES", "0")
+    disabled = _backend([_msg("done")] * 3)
+    disabled.run("task")
+    assert "Verified operation recipes for Qwen" not in disabled.last_system
+
+
 def test_session_config_freezes_mutable_inputs():
     names = {"snapshot"}
     tools = []
@@ -241,6 +257,22 @@ def test_out_of_profile_call_is_rejected(monkeypatch):
     r = b.run("look")
     assert b._calls == [] and r.usage["rejected_tool_calls"] == 1
     assert "not available in the ax profile" in b.messages[-2]["content"]
+
+
+def test_three_distinct_applescript_compile_errors_abort_early(monkeypatch):
+    calls = [{"function": {"name": "applescript",
+                            "arguments": {"script": f"broken {index}"}}}
+             for index in range(3)]
+    error = "AppleScript error: probe.scpt: script error: Expected expression. (-2741)"
+    b = _backend([_msg(tool_calls=[call]) for call in calls],
+                 dispatch=lambda name, args: error, monkeypatch=monkeypatch)
+    result = b.run("run a script")
+    assert result.aborted and result.stop_reason == "applescript_compile_loop"
+    assert result.turns == 3 and len(b._calls) == 3
+    assert result.usage["applescript_compile_errors"] == 3
+    assert result.usage["applescript_compile_aborts"] == 1
+    assert any("APPLESCRIPT_COMPILE_LOOP" in message.get("content", "")
+               for message in b.messages if message.get("role") == "tool")
 
 
 def test_announce_without_act_is_nudged(monkeypatch):
