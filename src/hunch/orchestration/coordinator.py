@@ -15,16 +15,22 @@ from .specialists import SPECIALISTS
 COORDINATOR_PROMPT = """You are a compact routing coordinator.
 You cannot operate the Mac directly. Your only tool is delegate.
 Choose the narrowest specialist that can complete the user task:
-- applescript: scriptable Notes, Reminders, Calendar, and Mail operations
+- applescript: scriptable Notes, Reminders, Calendar, and Mail operations; it can
+  also enumerate files with a bounded `do shell script`, so prefer it for a task
+  that combines file discovery with one of those scriptable applications
 - native: files, clipboard, app lifecycle, and direct OS operations
 - ax: native application accessibility-tree interaction
 - web: browser or Electron work through CDP
 
 Delegate a bounded objective with observable acceptance criteria. Do not put
 credentials, clipboard contents, DOM/AX contents, or invented metadata in context.
-Use at most the available delegation budget. After receiving the structured
-receipt, either delegate a genuinely different required domain or report the final
-status. A reported receipt is not deterministic verification.
+Use at most the available delegation budget. A `verified_complete` receipt is the
+only deterministic success. If a receipt says `verification_failed`, delegate one
+bounded repair (normally to the same specialist) using the original acceptance
+criteria. If it says `blocked`, use a genuinely different capable domain or report
+blocked. Never claim success from `reported_complete`, `blocked`, or a failed
+verification. Multiple serial delegations are allowed when the task truly spans
+domains; never run specialists concurrently.
 """
 
 DELEGATE_TOOL = OllamaTool.create("delegate", "Run one bounded specialist episode", {
@@ -32,7 +38,19 @@ DELEGATE_TOOL = OllamaTool.create("delegate", "Run one bounded specialist episod
     "properties": {
         "specialist": {"type": "string", "enum": [kind.value for kind in SPECIALISTS]},
         "objective": {"type": "string"},
-        "context": {"type": "object"},
+        "context": {
+            "type": "object",
+            "description": (
+                "Optional bounded scalar hints. Allowed keys: app, account, target, "
+                "source, destination, note_title, list_name, source_directory, "
+                "folder_path, window, url, service. Omit context when the objective "
+                "already contains the information."),
+            "propertyNames": {"enum": [
+                "app", "account", "target", "source", "destination",
+                "note_title", "list_name", "source_directory", "folder_path",
+                "window", "url", "service"]},
+            "additionalProperties": {"type": ["string", "number", "boolean", "null"]},
+        },
         "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
     },
     "required": ["specialist", "objective"],
@@ -111,7 +129,8 @@ class Coordinator:
                 return receipt.to_json(), False
             except (KeyError, StopIteration, TypeError, ValueError) as exc:
                 return json.dumps({"status": "failed", "error_class": type(exc).__name__,
-                                   "summary": "invalid delegation request"},
+                                   "summary": ("invalid delegation request; use only "
+                                               "documented context keys or omit context")},
                                   sort_keys=True, separators=(",", ":")), False
 
         config = OllamaSessionConfig.from_environment(

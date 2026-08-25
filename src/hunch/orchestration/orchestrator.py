@@ -6,7 +6,8 @@ import uuid
 from dataclasses import dataclass, field
 
 from ..backends.ollama import OllamaBackend, OllamaSessionConfig
-from .contracts import DelegationRequest, SpecialistReceipt, SpecialistStatus
+from .contracts import (DelegationRequest, SpecialistReceipt, SpecialistStatus,
+                        TrustedEvidence, TrustedEvidenceSource)
 from .execution import (ExecutionLease, PhysicalOperationBudget,
                         RetryableTransportError, ScopedDispatcher)
 from .specialists import SPECIALISTS
@@ -75,7 +76,7 @@ def _safe_usage(usage):
 
 class SpecialistOrchestrator:
     def __init__(self, hunch, *, limits=None, trace_sink=None, session_factory=None,
-                 lease=None, can_use_tool=None, on_event=None):
+                 lease=None, can_use_tool=None, on_event=None, state_verifier=None):
         self.hunch = hunch
         self.limits = limits or OrchestrationLimits()
         self.trace_sink = trace_sink or InMemoryTraceSink()
@@ -84,6 +85,7 @@ class SpecialistOrchestrator:
         self.can_use_tool = (can_use_tool if can_use_tool is not None
                              else getattr(hunch, "_can_use_tool", None))
         self.on_event = on_event
+        self.state_verifier = state_verifier
         self._prompts = {kind: spec.prompt() for kind, spec in SPECIALISTS.items()}
         self._interrupted = threading.Event()
         self._active_lock = threading.Lock()
@@ -137,6 +139,7 @@ class SpecialistOrchestrator:
         used_before = state.budget.used
         result = None
         failure = None
+        verifier_evidence = trusted_evidence
 
         def emit(kind, data):
             events.append({"kind": kind, "data": data})
@@ -182,6 +185,24 @@ class SpecialistOrchestrator:
                     with self._active_lock:
                         self._active_child = None
 
+            if (failure is None and result is not None and not result.aborted
+                    and verifier_evidence is None and self.state_verifier is not None):
+                try:
+                    verifier_evidence = self.state_verifier(state, request)
+                    if verifier_evidence is not None:
+                        if not isinstance(verifier_evidence, TrustedEvidence):
+                            raise TypeError("state verifier must return TrustedEvidence or None")
+                    events.append({"kind": "verification", "data": {
+                        "ran": verifier_evidence is not None,
+                        "passed": bool(verifier_evidence and verifier_evidence.passed)}})
+                except Exception as exc:
+                    verifier_evidence = TrustedEvidence.create(
+                        TrustedEvidenceSource.RUNTIME_VERIFIER,
+                        {"passed": False, "verifier_error": True})
+                    events.append({"kind": "verification", "data": {
+                        "ran": True, "passed": False,
+                        "error_class": type(exc).__name__}})
+
         after = _disturbances(self.hunch)
         disturbance_delta = _delta(before, after)
         physical_operations = state.budget.used - used_before
@@ -200,13 +221,17 @@ class SpecialistOrchestrator:
                 status = SpecialistStatus.TIMEOUT
             elif result.aborted:
                 status = SpecialistStatus.FAILED
-            elif trusted_evidence is not None:
+            elif verifier_evidence is not None and verifier_evidence.passed:
                 status = SpecialistStatus.VERIFIED_COMPLETE
+            elif verifier_evidence is not None:
+                status = SpecialistStatus.VERIFICATION_FAILED
             elif "blocked" in (result.text or "").lower():
+                status = SpecialistStatus.BLOCKED
+            elif not dispatch_events:
                 status = SpecialistStatus.BLOCKED
             else:
                 status = SpecialistStatus.REPORTED_COMPLETE
-        evidence = trusted_evidence.labels() if trusted_evidence is not None else ()
+        evidence = verifier_evidence.labels() if verifier_evidence is not None else ()
         if not evidence:
             evidence = (f"tools:{safe_tools}", f"dispatches:{len(dispatch_events)}")
         receipt = SpecialistReceipt.create(
@@ -217,6 +242,6 @@ class SpecialistOrchestrator:
             tool_calls=len(tool_names), physical_operations=physical_operations,
             usage=_safe_usage(usage), trace_id=trace_id,
             disturbance_delta=disturbance_delta,
-            trusted_evidence=trusted_evidence)
+            trusted_evidence=verifier_evidence)
         state.receipts.append(receipt)
         return receipt

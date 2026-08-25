@@ -27,6 +27,7 @@ class SpecialistKind(StrEnum):
 class SpecialistStatus(StrEnum):
     REPORTED_COMPLETE = "reported_complete"
     VERIFIED_COMPLETE = "verified_complete"
+    VERIFICATION_FAILED = "verification_failed"
     BLOCKED = "blocked"
     FAILED = "failed"
     TIMEOUT = "timeout"
@@ -63,6 +64,11 @@ class TrustedEvidence:
     def labels(self):
         return tuple(f"{self.source.value}:{key}={str(value).lower()}"
                      for key, value in self.facts.items())
+
+    @property
+    def passed(self):
+        """Only an explicit boolean pass can promote a model report to verified."""
+        return self.facts.get("passed") is True
 
 
 def _bounded_text(value, name, limit, *, empty=False):

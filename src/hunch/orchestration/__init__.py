@@ -3,7 +3,7 @@
 Nothing in this package is registered as an MCP tool or exposed by ``Hunch.agent``.
 """
 
-ORCHESTRATOR_VERSION = "experiment-v1"
+ORCHESTRATOR_VERSION = "experiment-v2"
 
 from .contracts import (DelegationRequest, SpecialistKind, SpecialistReceipt,
                         SpecialistStatus, TrustedEvidence, TrustedEvidenceSource)

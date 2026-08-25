@@ -89,4 +89,40 @@ def test_invalid_delegation_never_touches_mac(monkeypatch):
         "x", deadline=time.monotonic() + 10)
     assert physical == [] and result.receipts == ()
     tool_result = next(m for m in created[0].messages if m.get("role") == "tool")
-    assert json.loads(tool_result["content"])["summary"] == "invalid delegation request"
+    assert "invalid delegation request" in json.loads(tool_result["content"])["summary"]
+
+
+def test_documented_note_and_directory_context_reach_specialists(monkeypatch):
+    hunch, requests = _Hunch(), []
+
+    class RecordingOrchestrator(SpecialistOrchestrator):
+        def run_specialist(self, state, request, **kwargs):
+            requests.append(request)
+            return super().run_specialist(state, request, **kwargs)
+
+    def child_factory(config, dispatcher):
+        backend = OllamaBackend(hunch, session_config=config, dispatcher=dispatcher)
+        backend._chat = lambda body: _message("blocked")
+        return backend
+
+    coordinator_responses = iter([
+        _message(tool="delegate", arguments={
+            "specialist": "applescript", "objective": "edit note",
+            "context": {"note_title": "Example"}}),
+        _message(tool="delegate", arguments={
+            "specialist": "applescript", "objective": "enumerate PDFs",
+            "context": {"source_directory": "/tmp/docs"}}),
+        _message("blocked"),
+    ])
+
+    def coordinator_factory(config, dispatcher):
+        backend = OllamaBackend(hunch, session_config=config, dispatcher=dispatcher)
+        backend._chat = lambda body: next(coordinator_responses)
+        return backend
+
+    orchestrator = RecordingOrchestrator(hunch, session_factory=child_factory)
+    outcome = Coordinator(orchestrator, session_factory=coordinator_factory).run(
+        "task", deadline=time.monotonic() + 10)
+    assert len(outcome.receipts) == 2
+    assert dict(requests[0].context) == {"note_title": "Example"}
+    assert dict(requests[1].context) == {"source_directory": "/tmp/docs"}

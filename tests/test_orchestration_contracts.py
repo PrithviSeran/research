@@ -55,10 +55,18 @@ def test_trusted_evidence_rejects_arbitrary_prose():
         TrustedEvidence("benchmark_checker", {"detail": "direct bypass"})
 
 
+def test_trusted_evidence_requires_explicit_boolean_pass():
+    assert TrustedEvidence.create("runtime_verifier", {"passed": True}).passed is True
+    assert TrustedEvidence.create("runtime_verifier", {"passed": False}).passed is False
+    assert TrustedEvidence.create("runtime_verifier", {"observed": True}).passed is False
+
+
 def test_registry_tools_are_real_and_delegate_is_private():
     validate_registry()
     assert all(spec.tool_names <= set(_DISPATCH) for spec in SPECIALISTS.values())
     assert "delegate" not in _DISPATCH
+    assert "note_title" in SPECIALISTS[SpecialistKind.APPLESCRIPT].allowed_context_keys
+    assert "source_directory" in SPECIALISTS[SpecialistKind.APPLESCRIPT].allowed_context_keys
 
 
 def test_recipe_corpus_is_stable_and_complete():

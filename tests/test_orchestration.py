@@ -6,7 +6,8 @@ import pytest
 
 import hunch.orchestration.execution as execution_mod
 from hunch.agent import AgentResult
-from hunch.orchestration.contracts import DelegationRequest, SpecialistStatus
+from hunch.orchestration.contracts import (DelegationRequest, SpecialistStatus,
+                                           TrustedEvidence)
 from hunch.orchestration.execution import (ExecutionLease, PhysicalOperationBudget,
                                            RetryableTransportError, ScopedDispatcher)
 from hunch.orchestration.orchestrator import (InMemoryTraceSink, OrchestrationLimits,
@@ -142,7 +143,30 @@ def test_retry_once_only_for_retryable_transport_error():
     state = orchestrator.new_run("task", deadline=time.monotonic() + 10)
     receipt = orchestrator.run_specialist(state, _request())
     assert len(attempts) == 2 and state.retries == 1
-    assert receipt.status is SpecialistStatus.REPORTED_COMPLETE
+    assert receipt.status is SpecialistStatus.BLOCKED
+
+
+def test_runtime_verifier_controls_verified_status():
+    evidence = iter([
+        TrustedEvidence.create("runtime_verifier", {"passed": False}),
+        TrustedEvidence.create("runtime_verifier", {"passed": True}),
+    ])
+
+    def factory(config, dispatcher):
+        def run(task, on_event, **kwargs):
+            on_event("tool", {"name": "snapshot", "input": {"app": "Settings"}})
+            dispatcher("snapshot", {"app": "Settings"})
+            return AgentResult("done", 1, "end_turn", {}, False)
+        return _Child(run)
+
+    orchestrator = SpecialistOrchestrator(
+        _Hunch(), session_factory=factory,
+        state_verifier=lambda state, request: next(evidence))
+    state = orchestrator.new_run("task", deadline=time.monotonic() + 10)
+    failed = orchestrator.run_specialist(state, _request())
+    passed = orchestrator.run_specialist(state, _request())
+    assert failed.status is SpecialistStatus.VERIFICATION_FAILED
+    assert passed.status is SpecialistStatus.VERIFIED_COMPLETE
 
 
 def test_ordinary_failure_is_not_retried():

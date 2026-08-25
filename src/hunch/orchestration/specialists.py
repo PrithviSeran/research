@@ -23,13 +23,15 @@ SPECIALISTS = {
         SpecialistKind.APPLESCRIPT,
         frozenset({"applescript", "clipboard_get", "clipboard_set", "list_apps",
                    "notify_user"}), "applescript.md",
-        frozenset({"app", "account", "target", "source"})),
+        frozenset({"app", "account", "target", "source", "note_title",
+                   "list_name", "source_directory", "folder_path"})),
     SpecialistKind.NATIVE: SpecialistSpec(
         SpecialistKind.NATIVE,
         frozenset({"file_op", "trash", "open_file", "reveal_in_finder",
                    "clipboard_get", "clipboard_set", "list_apps", "launch_app",
                    "quit_app", "notify_user", "applescript"}), "native.md",
-        frozenset({"app", "source", "destination", "target"})),
+        frozenset({"app", "source", "destination", "target",
+                   "source_directory", "folder_path"})),
     SpecialistKind.AX: SpecialistSpec(
         SpecialistKind.AX,
         frozenset({"snapshot", "find", "act", "list_apps", "launch_app",
