@@ -1,0 +1,1 @@
+"""Canonical specialist recipe resources."""
