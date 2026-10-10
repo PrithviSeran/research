@@ -9,4 +9,6 @@ build/
 .DS_Store
 .pytest_cache/
 *.backup
+.env
 .claude/
+research/distill/artifacts/

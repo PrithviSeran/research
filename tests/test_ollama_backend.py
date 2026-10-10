@@ -275,6 +275,20 @@ def test_three_distinct_applescript_compile_errors_abort_early(monkeypatch):
                for message in b.messages if message.get("role") == "tool")
 
 
+def test_applescript_access_error_does_not_advance_compile_cutoff(monkeypatch):
+    calls = [{"function": {"name": "applescript",
+                            "arguments": {"script": f"probe {index}"}}}
+             for index in range(3)]
+    access_error = ("AppleScript error: Not authorized to send Apple events to "
+                    "System Events. (-1723)")
+    b = _backend([*[_msg(tool_calls=[call]) for call in calls], _msg("blocked")],
+                 dispatch=lambda name, args: access_error, monkeypatch=monkeypatch)
+    result = b.run("run a script")
+    assert not result.aborted and result.stop_reason == "end_turn"
+    assert result.usage["applescript_compile_errors"] == 0
+    assert result.usage["applescript_compile_aborts"] == 0
+
+
 def test_announce_without_act_is_nudged(monkeypatch):
     # The measured 04/12 failure: a plan narration with no tool call must be pushed
     # back into acting, and the nudge counted.

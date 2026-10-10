@@ -408,8 +408,11 @@ class OllamaBackend(Backend):
         if name != "applescript":
             return False
         text = str(result.get("content", "")).casefold()
+        # ``applescript error:`` itself contains the substring ``script error:``.
+        # Require the diagnostic separator so runtime/access errors such as -1723
+        # cannot trip the compile-loop cutoff merely because of the outer prefix.
         return ("applescript error:" in text
-                and ("script error:" in text or "(-2741)" in text))
+                and (": script error:" in text or "(-2741)" in text))
 
     def _run_tool(self, name, args, emit):
         """Dispatch one call and return its role='tool' message. PNG bytes ride in
